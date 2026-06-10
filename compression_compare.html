@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>圧縮比較プレイヤー</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0c0e13; --surf: #14171f; --surf2: #1c2030;
+  --bdr: rgba(255,255,255,0.07); --bdr2: rgba(255,255,255,0.13);
+  --tx: #dde2f0; --tx2: #6b7394; --tx3: #9ba3c4;
+  --a: #f97316; --b: #34d399; --r: 10px;
+}
+body { font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--tx); min-height:100vh; display:flex; flex-direction:column; }
+header { padding:12px 20px; border-bottom:1px solid var(--bdr); display:flex; align-items:center; gap:10px; }
+.logo { width:28px; height:28px; background:linear-gradient(135deg,var(--a),var(--b)); border-radius:7px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+header h1 { font-size:14px; font-weight:600; }
+header p  { font-size:11px; color:var(--tx2); }
+
+.drop-zone { margin:24px auto; width:100%; max-width:700px; aspect-ratio:16/9; border:2px dashed var(--bdr2); border-radius:var(--r); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; cursor:pointer; transition:all .2s; color:var(--tx2); font-size:13px; position:relative; overflow:hidden; }
+.drop-zone:hover,.drop-zone.drag { border-color:var(--a); background:rgba(249,115,22,.05); }
+.drop-zone input { position:absolute; inset:0; opacity:0; cursor:pointer; }
+
+.players { display:none; flex-direction:column; gap:0; padding:0 16px 16px; max-width:1200px; margin:0 auto; width:100%; }
+.players.ready { display:flex; }
+
+.panes { display:grid; gap:10px; margin-bottom:10px; }
+.panes.dual   { grid-template-columns:1fr 1fr; }
+.panes.single { grid-template-columns:1fr; max-width:640px; margin:0 auto; width:100%; }
+@media(max-width:640px){ .panes{ grid-template-columns:1fr !important; } }
+
+.pane { background:#000; border-radius:var(--r); overflow:hidden; position:relative; }
+.pane canvas { width:100%; display:block; }
+.pane.hidden-pane { display:none; }
+.pane-badge { position:absolute; top:8px; left:8px; border-radius:5px; padding:3px 9px; font-size:11px; font-weight:600; color:#fff; }
+.pane-a .pane-badge { background:rgba(249,115,22,.85); }
+.pane-b .pane-badge { background:rgba(52,211,153,.85); }
+.pane-info { position:absolute; bottom:8px; right:8px; background:rgba(0,0,0,.65); border-radius:5px; padding:2px 8px; font-size:10px; color:#fff; font-variant-numeric:tabular-nums; }
+
+.ctrl-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
+.ctrl-card { background:var(--surf); border:1px solid var(--bdr); border-radius:var(--r); padding:12px 14px; }
+.ctrl-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; gap:8px; }
+.ctrl-label { font-size:11px; color:var(--tx2); }
+.val-big { font-size:32px; font-weight:700; letter-spacing:-.03em; color:#fff; font-variant-numeric:tabular-nums; line-height:1; }
+.val-unit { font-size:12px; color:var(--tx2); margin-left:3px; }
+
+.toggle-btn { display:flex; align-items:center; gap:6px; padding:4px 10px; border-radius:6px; border:1px solid var(--bdr2); background:transparent; color:var(--tx2); font-size:11px; cursor:pointer; font-family:inherit; transition:all .15s; flex-shrink:0; }
+.toggle-btn:hover { color:var(--tx); }
+.toggle-btn.on { background:rgba(249,115,22,.18); border-color:var(--a); color:var(--a); }
+.toggle-btn.on-b { background:rgba(52,211,153,.18); border-color:var(--b); color:var(--b); }
+.toggle-dot { width:8px; height:8px; border-radius:50%; background:currentColor; }
+
+.gslider { -webkit-appearance:none; appearance:none; width:100%; height:5px; border-radius:3px; outline:none; cursor:pointer; margin:8px 0; }
+.gslider::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:#fff; box-shadow:0 1px 5px rgba(0,0,0,.4); cursor:pointer; }
+
+.presets { display:flex; flex-wrap:wrap; gap:4px; }
+.pre { padding:3px 8px; border-radius:5px; border:1px solid var(--bdr2); background:transparent; color:var(--tx2); font-size:11px; cursor:pointer; font-family:inherit; transition:all .15s; }
+.pre:hover { color:var(--tx); }
+.pre.on-a { background:var(--a); color:#fff; border-color:transparent; }
+.pre.on-b { background:var(--b); color:#fff; border-color:transparent; }
+.sub-note { font-size:11px; color:var(--tx2); margin-top:6px; text-align:center; }
+.sub-note b { color:var(--tx); }
+
+/* size meter */
+.size-meter { background:var(--surf2); border-radius:7px; padding:8px 10px; margin-top:8px; }
+.sm-row { display:flex; align-items:center; gap:6px; margin-bottom:4px; }
+.sm-row:last-child { margin-bottom:0; }
+.sm-lbl { font-size:10px; color:var(--tx2); min-width:60px; }
+.sm-bar-bg { flex:1; height:4px; background:rgba(255,255,255,.08); border-radius:2px; overflow:hidden; }
+.sm-bar { height:100%; border-radius:2px; transition:width .3s; }
+.sm-num { font-size:10px; color:var(--tx2); min-width:48px; text-align:right; font-variant-numeric:tabular-nums; }
+
+/* quality diff badge */
+.q-diff { font-size:11px; color:var(--tx2); text-align:center; margin-top:6px; }
+.q-diff b { color:var(--tx); }
+
+.transport { background:var(--surf); border:1px solid var(--bdr); border-radius:var(--r); padding:12px 14px; display:flex; flex-direction:column; gap:10px; }
+.seek-row { display:flex; align-items:center; gap:8px; }
+.tl { font-size:11px; color:var(--tx2); min-width:64px; font-variant-numeric:tabular-nums; }
+.seek { flex:1; -webkit-appearance:none; appearance:none; height:4px; border-radius:2px; background:var(--bdr2); outline:none; cursor:pointer; }
+.seek::-webkit-slider-thumb { -webkit-appearance:none; width:13px; height:13px; border-radius:50%; background:var(--a); cursor:pointer; }
+.ctrl-row { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.cbtn { height:32px; border-radius:7px; border:1px solid var(--bdr2); background:var(--surf2); color:var(--tx); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px; padding:0 14px; font-size:12px; font-family:inherit; transition:all .15s; }
+.cbtn:hover { background:#252a3a; }
+.cbtn.primary { background:var(--a); border-color:transparent; color:#fff; }
+.cbtn.sq { width:32px; padding:0; }
+.cbtn.loop-on { border-color:var(--a); color:var(--a); }
+.sp { flex:1; }
+.spd-row { display:flex; gap:4px; }
+.spd { padding:3px 8px; border-radius:5px; border:1px solid var(--bdr2); background:transparent; color:var(--tx2); font-size:11px; cursor:pointer; font-family:inherit; transition:all .15s; }
+.spd:hover { color:var(--tx); }
+.spd.on { background:rgba(249,115,22,.2); color:var(--a); border-color:var(--a); }
+
+.sync-bar { display:flex; align-items:center; justify-content:center; gap:8px; padding:4px 0 8px; font-size:11px; color:var(--tx2); }
+.sync-dot { width:7px; height:7px; border-radius:50%; background:#444; }
+.sync-dot.ok { background:var(--b); animation:pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1}50%{opacity:.3} }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12h8M12 8v8"/></svg>
+  </div>
+  <div><h1>圧縮比較プレイヤー</h1><p>元の映像と JPEG 圧縮映像を同期して並列再生</p></div>
+</header>
+
+<div class="drop-zone" id="drop-zone">
+  <input type="file" id="file-in" accept="video/*">
+  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".35"><rect x="2" y="2" width="20" height="20" rx="3"/><path d="M10 8l6 4-6 4V8z"/></svg>
+  <div style="text-align:center"><div style="color:var(--tx);margin-bottom:3px">動画ファイルをドロップ</div><div style="font-size:12px">MP4・WebM・MOV など</div></div>
+</div>
+
+<div class="players" id="players">
+  <div class="panes dual" id="panes">
+    <div class="pane pane-a" id="pane-a">
+      <canvas id="cv-a"></canvas>
+      <div class="pane-badge" id="badge-a">元の映像</div>
+      <div class="pane-info" id="info-a">—</div>
+    </div>
+    <div class="pane pane-b" id="pane-b">
+      <canvas id="cv-b"></canvas>
+      <div class="pane-badge" id="badge-b">圧縮後</div>
+      <div class="pane-info" id="info-b">—</div>
+    </div>
+  </div>
+
+  <div class="ctrl-grid">
+    <!-- A: original -->
+    <div class="ctrl-card">
+      <div class="ctrl-head">
+        <span class="ctrl-label">🟠 元の映像（無圧縮）</span>
+        <button class="toggle-btn on" id="toggle-a">
+          <span class="toggle-dot"></span><span id="toggle-a-lbl">表示中</span>
+        </button>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:4px;margin-bottom:6px">
+        <span class="val-big" id="res-a">—</span><span class="val-unit" style="font-size:13px">px</span>
+      </div>
+      <div style="font-size:11px;color:var(--tx2)" id="orig-info">動画を読み込むと表示されます</div>
+      <div class="size-meter">
+        <div class="sm-row">
+          <span class="sm-lbl">推定フレーム</span>
+          <div class="sm-bar-bg"><div class="sm-bar" id="bar-orig" style="width:100%;background:rgba(249,115,22,.6)"></div></div>
+          <span class="sm-num" id="sz-orig">—</span>
+        </div>
+      </div>
+    </div>
+    <!-- B: compressed -->
+    <div class="ctrl-card">
+      <div class="ctrl-head">
+        <span class="ctrl-label">🟢 圧縮後（JPEG 品質）</span>
+        <button class="toggle-btn on on-b" id="toggle-b">
+          <span class="toggle-dot"></span><span id="toggle-b-lbl">表示中</span>
+        </button>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:4px;margin-bottom:4px">
+        <span class="val-big" id="q-big">85</span><span class="val-unit">%</span>
+      </div>
+      <input type="range" class="gslider" id="sl-q" min="1" max="100" value="85" step="1"
+        style="background:linear-gradient(to right,var(--b) 0%,var(--b) 84%,var(--surf2) 84%)">
+      <div class="presets" id="q-presets">
+        <button class="pre" data-q="5">5%<br><span style="font-size:9px">最低</span></button>
+        <button class="pre" data-q="10">10%</button>
+        <button class="pre" data-q="20">20%</button>
+        <button class="pre" data-q="40">40%</button>
+        <button class="pre" data-q="60">60%</button>
+        <button class="pre" data-q="75">75%</button>
+        <button class="pre active on-b" data-q="85">85%</button>
+        <button class="pre" data-q="95">95%</button>
+        <button class="pre" data-q="100">100%<br><span style="font-size:9px">最高</span></button>
+      </div>
+      <div class="size-meter" style="margin-top:8px">
+        <div class="sm-row">
+          <span class="sm-lbl">推定フレーム</span>
+          <div class="sm-bar-bg"><div class="sm-bar" id="bar-comp" style="width:60%;background:var(--b)"></div></div>
+          <span class="sm-num" id="sz-comp">—</span>
+        </div>
+        <div class="sm-row">
+          <span class="sm-lbl">削減率</span>
+          <div class="sm-bar-bg"><div class="sm-bar" id="bar-save" style="width:40%;background:var(--b)"></div></div>
+          <span class="sm-num" id="sz-save">—</span>
+        </div>
+      </div>
+      <div class="q-diff" id="q-diff">—</div>
+    </div>
+  </div>
+
+  <div class="sync-bar">
+    <span class="sync-dot" id="sync-dot"></span>
+    <span id="sync-label">同期待機中</span>
+  </div>
+
+  <div class="transport">
+    <div class="seek-row">
+      <span class="tl" id="tl-cur">0:00.000</span>
+      <input type="range" class="seek" id="seekbar" min="0" max="1000" value="0">
+      <span class="tl" style="text-align:right" id="tl-dur">—</span>
+    </div>
+    <div class="ctrl-row">
+      <button class="cbtn sq" id="btn-prev"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"/><line x1="5" y1="19" x2="5" y2="5"/></svg></button>
+      <button class="cbtn primary" id="btn-play"><svg id="play-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> 再生</button>
+      <button class="cbtn sq" id="btn-next"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button>
+      <button class="cbtn sq loop-on" id="btn-loop"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg></button>
+      <div class="sp"></div>
+      <span style="font-size:11px;color:var(--tx2)">速度：</span>
+      <div class="spd-row">
+        <button class="spd" data-spd="0.25">×¼</button>
+        <button class="spd" data-spd="0.5">×½</button>
+        <button class="spd on" data-spd="1">×1</button>
+        <button class="spd" data-spd="2">×2</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<video id="vid" style="display:none" preload="auto"></video>
+<canvas id="cv-work" style="display:none"></canvas>
+
+<script>
+let vw=0,vh=0,dur=0,quality=0.85,speed=1,looping=true,playing=false;
+let rafId=null,lastRender=null,seeking=false;
+let showA=true,showB=true;
+let lastFrameBytes=0;
+
+const vid    = document.getElementById('vid');
+const cvA    = document.getElementById('cv-a');
+const cvB    = document.getElementById('cv-b');
+const cvWork = document.getElementById('cv-work');
+const ctA    = cvA.getContext('2d');
+const ctB    = cvB.getContext('2d');
+const ctW    = cvWork.getContext('2d');
+const seekEl = document.getElementById('seekbar');
+const panesEl= document.getElementById('panes');
+
+// Drop
+const dz=document.getElementById('drop-zone');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');});
+dz.addEventListener('dragleave',()=>dz.classList.remove('drag'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag');const f=e.dataTransfer.files[0];if(f?.type.startsWith('video/'))load(f);});
+document.getElementById('file-in').addEventListener('change',e=>{if(e.target.files[0])load(e.target.files[0]);});
+
+function load(f){vid.src=URL.createObjectURL(f);vid.load();vid.addEventListener('loadedmetadata',onMeta,{once:true});}
+
+function onMeta(){
+  vw=vid.videoWidth;vh=vid.videoHeight;dur=vid.duration;
+  [cvA,cvB,cvWork].forEach(c=>{c.width=vw;c.height=vh;});
+  dz.style.display='none';
+  document.getElementById('players').className='players ready';
+  document.getElementById('tl-dur').textContent=fmt(dur);
+  document.getElementById('res-a').textContent=`${vw}×${vh}`;
+  document.getElementById('orig-info').textContent=`${vw}×${vh} px・${fmt(dur)}・無圧縮で表示`;
+  // raw frame size estimate: w*h*3 bytes
+  const rawKB=(vw*vh*3/1024).toFixed(0);
+  document.getElementById('sz-orig').textContent=rawKB+' KB';
+  document.getElementById('sync-dot').className='sync-dot ok';
+  document.getElementById('sync-label').textContent='同期再生中（同じ動画を共有）';
+  updateQUI();
+  vid.currentTime=0;
+  vid.addEventListener('seeked',drawFrame,{once:true});
+  startPlay();
+}
+
+// ON/OFF
+document.getElementById('toggle-a').addEventListener('click',()=>{
+  showA=!showA;
+  document.getElementById('toggle-a').className='toggle-btn'+(showA?' on':'');
+  document.getElementById('toggle-a-lbl').textContent=showA?'表示中':'非表示';
+  document.getElementById('pane-a').classList.toggle('hidden-pane',!showA);
+  updatePaneLayout();
+  if(!showA)ctA.clearRect(0,0,vw,vh); else drawFrame();
+});
+document.getElementById('toggle-b').addEventListener('click',()=>{
+  showB=!showB;
+  document.getElementById('toggle-b').className='toggle-btn'+(showB?' on on-b':'');
+  document.getElementById('toggle-b-lbl').textContent=showB?'表示中':'非表示';
+  document.getElementById('pane-b').classList.toggle('hidden-pane',!showB);
+  updatePaneLayout();
+  if(!showB)ctB.clearRect(0,0,vw,vh); else drawFrame();
+});
+function updatePaneLayout(){panesEl.className='panes '+(showA&&showB?'dual':'single');}
+
+// Playback
+function startPlay(){
+  playing=true;updateBtn();vid.playbackRate=speed;
+  vid.play().catch(()=>{});lastRender=null;
+  rafId=requestAnimationFrame(loop);
+}
+function pause(){playing=false;updateBtn();vid.pause();cancelAnimationFrame(rafId);rafId=null;}
+function togglePlay(){if(playing)pause();else startPlay();}
+
+function loop(now){
+  if(!playing)return;
+  rafId=requestAnimationFrame(loop);
+  if(!lastRender){lastRender=now;return;}
+  lastRender=now;
+  if(vid.currentTime>=dur-0.02){
+    if(looping){vid.currentTime=0;return;}else{pause();return;}
+  }
+  drawFrame();
+  if(!seeking)updateSeek();
+}
+
+// Core draw: A = raw, B = jpeg-compressed copy
+function drawFrame(){
+  if(!vw)return;
+  if(showA){ctA.drawImage(vid,0,0,vw,vh);}
+  if(showB){
+    // draw to work canvas → encode JPEG → decode back → draw to B
+    ctW.drawImage(vid,0,0,vw,vh);
+    const dataURL=cvWork.toDataURL('image/jpeg',quality);
+    const img=new Image();
+    img.onload=()=>{
+      ctB.drawImage(img,0,0,vw,vh);
+      // estimate frame byte size from dataURL length (base64 ≈ *3/4)
+      const bytes=Math.round(dataURL.length*0.75);
+      if(Math.abs(bytes-lastFrameBytes)>512){lastFrameBytes=bytes;updateSizeMeters(bytes);}
+    };
+    img.src=dataURL;
+  }
+  updateBadges();
+  updateSeek();
+}
+
+function updateBadges(){
+  document.getElementById('badge-a').textContent=`元の映像`;
+  document.getElementById('badge-b').textContent=`JPEG Q${Math.round(quality*100)}`;
+  document.getElementById('info-a').textContent=`${vw}×${vh} 無圧縮`;
+  document.getElementById('info-b').textContent=`Q${Math.round(quality*100)}%`;
+}
+
+function updateSizeMeters(compBytes){
+  const rawBytes=vw*vh*3;
+  const ratio=Math.min(compBytes/rawBytes,1);
+  const saved=Math.max(0,1-ratio);
+  document.getElementById('sz-comp').textContent=fmtBytes(compBytes);
+  document.getElementById('sz-save').textContent=Math.round(saved*100)+'%';
+  document.getElementById('bar-comp').style.width=(ratio*100)+'%';
+  document.getElementById('bar-comp').style.background=ratio<0.3?'var(--b)':ratio<0.6?'#fbbf24':'#f87171';
+  document.getElementById('bar-save').style.width=(saved*100)+'%';
+}
+
+function updateSeek(){
+  if(!dur)return;
+  seekEl.value=(vid.currentTime/dur)*1000;
+  document.getElementById('tl-cur').textContent=fmt(vid.currentTime);
+}
+
+// Seek / step
+seekEl.addEventListener('mousedown',()=>{seeking=true;if(playing)pause();});
+seekEl.addEventListener('touchstart',()=>{seeking=true;if(playing)pause();},{passive:true});
+seekEl.addEventListener('input',()=>{const t=(seekEl.value/1000)*dur;vid.currentTime=t;vid.addEventListener('seeked',drawFrame,{once:true});document.getElementById('tl-cur').textContent=fmt(t);});
+seekEl.addEventListener('mouseup',()=>{seeking=false;});
+seekEl.addEventListener('touchend',()=>{seeking=false;},{passive:true});
+document.getElementById('btn-prev').addEventListener('click',()=>{pause();vid.currentTime=Math.max(0,vid.currentTime-1/30);vid.addEventListener('seeked',drawFrame,{once:true});});
+document.getElementById('btn-next').addEventListener('click',()=>{pause();vid.currentTime=Math.min(dur,vid.currentTime+1/30);vid.addEventListener('seeked',drawFrame,{once:true});});
+document.getElementById('btn-play').addEventListener('click',togglePlay);
+document.getElementById('btn-loop').addEventListener('click',()=>{looping=!looping;document.getElementById('btn-loop').classList.toggle('loop-on',looping);});
+
+function updateBtn(){
+  const ic=document.getElementById('play-icon'),btn=document.getElementById('btn-play');
+  if(playing){ic.innerHTML='<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>';btn.innerHTML=ic.outerHTML+' 停止';}
+  else{ic.innerHTML='<path d="M8 5v14l11-7z"/>';btn.innerHTML=ic.outerHTML+' 再生';}
+}
+document.querySelector('.spd-row').addEventListener('click',e=>{
+  const b=e.target.closest('[data-spd]');if(!b)return;
+  speed=parseFloat(b.dataset.spd);
+  document.querySelectorAll('.spd').forEach(x=>x.classList.toggle('on',x===b));
+  if(playing)vid.playbackRate=speed;lastRender=null;
+});
+
+// Quality slider
+document.getElementById('sl-q').addEventListener('input',function(){quality=+this.value/100;updateQUI();});
+document.getElementById('q-presets').addEventListener('click',e=>{
+  const b=e.target.closest('[data-q]');if(!b)return;
+  quality=+b.dataset.q/100;document.getElementById('sl-q').value=+b.dataset.q;updateQUI();
+});
+
+function updateQUI(){
+  const qp=Math.round(quality*100);
+  document.getElementById('q-big').textContent=qp;
+  document.querySelectorAll('#q-presets .pre').forEach(b=>b.classList.toggle('on-b',+b.dataset.q===qp));
+  const pct=qp-1;
+  document.getElementById('sl-q').style.background=`linear-gradient(to right,var(--b) 0%,var(--b) ${pct}%,var(--surf2) ${pct}%)`;
+  const label=qp>=90?'ほぼ劣化なし':qp>=70?`軽微な圧縮アーチファクト`:qp>=40?`中程度の圧縮（JPEG ノイズあり）`:`強い圧縮（ブロックノイズ顕著）`;
+  document.getElementById('q-diff').innerHTML=`<b>${label}</b>`;
+}
+
+function fmt(s){if(!isFinite(s))return'—';const m=Math.floor(s/60),ss=Math.floor(s%60),ms=Math.floor((s%1)*1000);return`${m}:${String(ss).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;}
+function fmtBytes(b){if(b>=1e6)return(b/1e6).toFixed(2)+' MB';if(b>=1024)return(b/1024).toFixed(0)+' KB';return b+' B';}
+</script>
+</body>
+</html>
