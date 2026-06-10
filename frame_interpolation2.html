@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>フレーム補間プレビュー</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0b0d12; --surf: #13161e; --surf2: #1a1f2e; --surf3: #222840;
+  --bdr: rgba(255,255,255,0.06); --bdr2: rgba(255,255,255,0.12);
+  --tx: #e2e6f3; --tx2: #6b7394; --tx3: #9ba3c4;
+  --acc: #7c6aff; --acc2: #a78bfa; --acc3: #38bdf8;
+  --grn: #34d399; --amb: #fbbf24; --red: #f87171;
+  --r: 12px; --rs: 8px; --rxs: 5px;
+}
+body { font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--tx); min-height:100vh; display:flex; flex-direction:column; }
+
+/* ── Header ── */
+header { padding:14px 24px; border-bottom:1px solid var(--bdr); display:flex; align-items:center; gap:12px; }
+.logo { width:32px; height:32px; background:linear-gradient(135deg,#7c6aff,#38bdf8); border-radius:9px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+header h1 { font-size:15px; font-weight:600; letter-spacing:-.01em; }
+header p  { font-size:12px; color:var(--tx2); }
+.hbadge { margin-left:auto; background:rgba(124,106,255,.15); border:1px solid rgba(124,106,255,.3); color:var(--acc2); border-radius:20px; padding:4px 12px; font-size:11px; }
+
+/* ── Layout ── */
+.body { display:flex; flex:1; overflow:hidden; }
+.main { flex:1; display:flex; flex-direction:column; align-items:center; gap:18px; padding:28px 24px; background:#080a0f; overflow-y:auto; }
+.side { width:300px; background:var(--surf); border-left:1px solid var(--bdr); padding:18px 16px; display:flex; flex-direction:column; gap:16px; overflow-y:auto; flex-shrink:0; }
+@media(max-width:780px){ .body{flex-direction:column} .side{width:100%;border-left:none;border-top:1px solid var(--bdr)} }
+
+/* ── Drop zone ── */
+.drop-zone { width:100%; max-width:680px; aspect-ratio:16/9; border:2px dashed var(--bdr2); border-radius:var(--r); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; cursor:pointer; transition:all .2s; color:var(--tx2); position:relative; overflow:hidden; }
+.drop-zone:hover,.drop-zone.drag { border-color:var(--acc); background:rgba(124,106,255,.05); }
+.drop-zone input { position:absolute; inset:0; opacity:0; cursor:pointer; }
+.drop-icon { opacity:.3; }
+
+/* ── Frame strip ── */
+.frame-strip { display:none; width:100%; max-width:680px; gap:8px; }
+.frame-strip.ready { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; }
+.frame-card { background:var(--surf); border:1px solid var(--bdr2); border-radius:var(--rs); overflow:hidden; }
+.frame-card.highlight { border-color:var(--acc); box-shadow:0 0 0 1px var(--acc); }
+.fc-head { padding:6px 10px; border-bottom:1px solid var(--bdr); display:flex; align-items:center; justify-content:space-between; }
+.fc-title { font-size:11px; color:var(--tx2); }
+.fc-time  { font-size:10px; color:var(--tx3); font-variant-numeric:tabular-nums; }
+.fc-body canvas { width:100%; display:block; }
+.arrow-mid { display:flex; flex-direction:column; align-items:center; gap:4px; color:var(--tx2); font-size:11px; padding:0 6px; }
+.arrow-mid svg { color:var(--acc); }
+
+/* ── Preview canvas ── */
+.preview-wrap { display:none; width:100%; max-width:680px; border-radius:var(--r); overflow:hidden; background:#000; position:relative; }
+.preview-wrap canvas { width:100%; display:block; }
+.prev-overlay { position:absolute; bottom:10px; left:10px; right:10px; display:flex; align-items:flex-end; justify-content:space-between; pointer-events:none; }
+.prev-badge { background:rgba(0,0,0,.7); backdrop-filter:blur(6px); border-radius:var(--rxs); padding:3px 9px; font-size:11px; color:#fff; font-variant-numeric:tabular-nums; }
+.prev-method { background:rgba(124,106,255,.7); backdrop-filter:blur(4px); border-radius:var(--rxs); padding:3px 9px; font-size:11px; color:#fff; }
+
+/* ── Scrubber ── */
+.scrub-wrap { width:100%; max-width:680px; display:none; flex-direction:column; gap:10px; }
+.scrub-track { position:relative; height:44px; }
+.scrub-bg { position:absolute; top:50%; left:0; right:0; height:6px; transform:translateY(-50%); background:var(--surf3); border-radius:3px; overflow:hidden; }
+.scrub-fill { position:absolute; left:0; top:0; height:100%; background:linear-gradient(to right,var(--acc),var(--acc3)); border-radius:3px; transition:width .05s; }
+.scrub-input { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+.scrub-thumb { position:absolute; top:50%; width:18px; height:18px; border-radius:50%; background:#fff; box-shadow:0 2px 8px rgba(0,0,0,.5); transform:translate(-50%,-50%); pointer-events:none; transition:left .05s; }
+.scrub-ticks { display:flex; justify-content:space-between; font-size:10px; color:var(--tx2); font-variant-numeric:tabular-nums; }
+.play-row { display:flex; align-items:center; gap:8px; }
+.pbtn { height:34px; border-radius:var(--rs); border:1px solid var(--bdr2); background:var(--surf); color:var(--tx); cursor:pointer; display:flex; align-items:center; justify-content:center; gap:6px; padding:0 14px; font-size:12px; font-family:inherit; transition:all .15s; }
+.pbtn:hover { background:var(--surf2); }
+.pbtn.primary { background:var(--acc); border-color:transparent; color:#fff; padding:0 18px; }
+.pbtn.primary:hover { background:#6a58ee; }
+.pbtn:disabled { opacity:.35; cursor:not-allowed; }
+.loop-btn { width:34px; padding:0; }
+.loop-btn.on { background:var(--surf3); border-color:var(--acc2); color:var(--acc2); }
+
+/* ── Progress ── */
+.build-progress { display:none; width:100%; max-width:680px; background:var(--surf); border:1px solid var(--bdr); border-radius:var(--rs); padding:14px 16px; }
+.bp-label { font-size:12px; color:var(--tx3); margin-bottom:8px; display:flex; justify-content:space-between; }
+.bp-bar-bg { height:5px; background:var(--surf3); border-radius:3px; overflow:hidden; }
+.bp-bar { height:100%; background:linear-gradient(to right,var(--acc),var(--acc3)); border-radius:3px; width:0%; transition:width .1s; }
+
+/* ── Sidebar ── */
+.sec-title { font-size:10px; text-transform:uppercase; letter-spacing:.1em; color:var(--tx2); margin-bottom:10px; }
+.row { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px; }
+.row-label { font-size:12px; color:var(--tx2); }
+.row-val { font-size:13px; font-weight:600; color:var(--tx); font-variant-numeric:tabular-nums; }
+.full-slider { -webkit-appearance:none; appearance:none; width:100%; height:5px; border-radius:3px; outline:none; cursor:pointer; margin-bottom:8px; }
+.full-slider::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:#fff; box-shadow:0 1px 5px rgba(0,0,0,.4); cursor:pointer; }
+.sl-frames { background:linear-gradient(to right,var(--acc) 0%,var(--acc) var(--p,50%),var(--surf3) var(--p,50%)); }
+.sl-fps    { background:linear-gradient(to right,var(--acc3) 0%,var(--acc3) var(--p,50%),var(--surf3) var(--p,50%)); }
+.sl-ease   { background:linear-gradient(to right,var(--acc2) 0%,var(--acc2) var(--p,50%),var(--surf3) var(--p,50%)); }
+.tick-row  { display:flex; justify-content:space-between; font-size:10px; color:var(--tx2); margin-bottom:10px; }
+
+.method-grid { display:grid; grid-template-columns:1fr 1fr; gap:5px; margin-bottom:4px; }
+.mth-btn { padding:7px 6px; border-radius:var(--rxs); border:1px solid var(--bdr2); background:transparent; color:var(--tx2); font-size:11px; cursor:pointer; font-family:inherit; transition:all .15s; text-align:center; line-height:1.3; }
+.mth-btn:hover { color:var(--tx); }
+.mth-btn.active { background:rgba(124,106,255,.2); border-color:var(--acc); color:var(--acc2); }
+
+.icard-grid { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+.icard { background:var(--surf2); border:1px solid var(--bdr); border-radius:var(--rs); padding:8px 10px; }
+.icard .v { font-size:15px; font-weight:600; color:#fff; font-variant-numeric:tabular-nums; }
+.icard .l { font-size:10px; color:var(--tx2); margin-top:1px; }
+
+hr.div { border:none; border-top:1px solid var(--bdr); }
+
+.tip { font-size:11px; color:var(--tx2); line-height:1.65; background:var(--surf2); border-radius:var(--rs); padding:10px 12px; }
+.tip b { color:var(--tx3); }
+
+/* ── Timeline range picker ── */
+.timeline-wrap { width:100%; max-width:680px; display:none; flex-direction:column; gap:8px; }
+.timeline-wrap.ready { display:flex; }
+.tl-header { font-size:11px; color:var(--tx2); display:flex; justify-content:space-between; align-items:center; }
+.tl-header b { color:var(--tx3); font-weight:500; }
+.tl-stage { position:relative; height:60px; border-radius:var(--rs); overflow:hidden; background:var(--surf3); border:1px solid var(--bdr2); cursor:crosshair; user-select:none; }
+.tl-film { position:absolute; inset:0; display:flex; pointer-events:none; }
+.tl-film-thumb { flex:1; background-size:cover; background-position:center; border-right:1px solid rgba(0,0,0,.3); }
+.tl-shade-left  { position:absolute; top:0; left:0; bottom:0; background:rgba(0,0,0,.55); pointer-events:none; }
+.tl-shade-right { position:absolute; top:0; right:0; bottom:0; background:rgba(0,0,0,.55); pointer-events:none; }
+.tl-range { position:absolute; top:0; bottom:0; border-left:3px solid var(--acc); border-right:3px solid var(--acc3); pointer-events:none; }
+.tl-handle { position:absolute; top:0; bottom:0; width:18px; cursor:ew-resize; z-index:10; display:flex; align-items:center; justify-content:center; }
+.tl-handle-bar { width:4px; height:36px; border-radius:2px; }
+.tl-handle.start { transform:translateX(-9px); }
+.tl-handle.end   { transform:translateX(-9px); }
+.tl-handle.start .tl-handle-bar { background:var(--acc); }
+.tl-handle.end   .tl-handle-bar { background:var(--acc3); }
+.tl-playhead { position:absolute; top:0; bottom:0; width:2px; background:var(--amb); pointer-events:none; opacity:0; }
+.tl-playhead.vis { opacity:1; }
+.tl-marks { display:flex; justify-content:space-between; font-size:9px; color:var(--tx2); font-variant-numeric:tabular-nums; }
+.sel-frames { display:flex; gap:8px; }
+.sel-frame-card { flex:1; background:var(--surf); border-radius:var(--rs); overflow:hidden; border:1px solid var(--bdr2); }
+.sel-frame-card.is-start { border-color:rgba(124,106,255,.6); }
+.sel-frame-card.is-end   { border-color:rgba(56,189,248,.6); }
+.sfc-head { padding:5px 9px; border-bottom:1px solid var(--bdr); display:flex; align-items:center; justify-content:space-between; gap:4px; }
+.sfc-title { font-size:10px; color:var(--tx2); }
+.sfc-time  { font-size:10px; color:var(--tx3); font-variant-numeric:tabular-nums; }
+.sfc-body canvas { width:100%; display:block; background:#000; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2">
+      <path d="M5 12h14M12 5l7 7-7 7"/>
+    </svg>
+  </div>
+  <div>
+    <h1>フレーム補間プレビュー</h1>
+    <p>動画の最初・最後のフレームから中間フレームを自動生成</p>
+  </div>
+  <div class="hbadge">ブラウザのみで動作</div>
+</header>
+
+<div class="body">
+<div class="main">
+
+  <!-- Drop -->
+  <div class="drop-zone" id="drop-zone">
+    <input type="file" id="file-input" accept="video/*">
+    <svg class="drop-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+      <rect x="2" y="2" width="20" height="20" rx="3"/><path d="M10 8l6 4-6 4V8z"/>
+    </svg>
+    <div style="text-align:center">
+      <div style="font-size:14px;color:var(--tx);margin-bottom:3px">動画ファイルをドロップ</div>
+      <div style="font-size:12px">MP4・WebM・MOV など — 最初と最後のフレームを自動抽出します</div>
+    </div>
+  </div>
+
+  <!-- Timeline range picker -->
+  <div class="timeline-wrap" id="timeline-wrap">
+    <div class="tl-header">
+      <span>▶ タイムラインをドラッグして開始・終了フレームを指定</span>
+      <b id="tl-range-label">—</b>
+    </div>
+    <div class="tl-stage" id="tl-stage">
+      <div class="tl-film" id="tl-film"></div>
+      <div class="tl-shade-left"  id="tl-shade-l" style="width:0%"></div>
+      <div class="tl-shade-right" id="tl-shade-r" style="width:0%"></div>
+      <div class="tl-range" id="tl-range" style="left:0%;right:0%"></div>
+      <div class="tl-handle start" id="tl-handle-s" style="left:0%">
+        <div class="tl-handle-bar"></div>
+      </div>
+      <div class="tl-handle end" id="tl-handle-e" style="left:100%">
+        <div class="tl-handle-bar"></div>
+      </div>
+      <div class="tl-playhead" id="tl-playhead"></div>
+    </div>
+    <div class="tl-marks" id="tl-marks"></div>
+
+    <!-- Selected frame previews -->
+    <div class="sel-frames">
+      <div class="sel-frame-card is-start">
+        <div class="sfc-head">
+          <span class="sfc-title">🟣 開始フレーム</span>
+          <span class="sfc-time" id="t-start">—</span>
+        </div>
+        <div class="sfc-body"><canvas id="cv-start"></canvas></div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:0 4px;color:var(--tx2);font-size:11px;flex-shrink:0">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--acc)" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        <span id="interp-count" style="white-space:nowrap">—</span>
+      </div>
+      <div class="sel-frame-card is-end">
+        <div class="sfc-head">
+          <span class="sfc-title">🔵 終了フレーム</span>
+          <span class="sfc-time" id="t-end">—</span>
+        </div>
+        <div class="sfc-body"><canvas id="cv-end"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Build button -->
+    <div style="display:flex;gap:8px;align-items:center">
+      <button class="pbtn primary" id="btn-build" onclick="buildFrames()" disabled>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        補間を生成
+      </button>
+      <span style="font-size:11px;color:var(--tx2)" id="build-hint">開始・終了を指定すると生成できます</span>
+    </div>
+  </div>
+
+  <!-- Build progress -->
+  <div class="build-progress" id="build-progress">
+    <div class="bp-label">
+      <span id="bp-text">補間フレームを生成中...</span>
+      <span id="bp-pct">0%</span>
+    </div>
+    <div class="bp-bar-bg"><div class="bp-bar" id="bp-bar"></div></div>
+  </div>
+
+  <!-- Preview -->
+  <div class="preview-wrap" id="preview-wrap">
+    <canvas id="cv-preview"></canvas>
+    <div class="prev-overlay">
+      <span class="prev-badge" id="prev-badge">F0 / 0</span>
+      <span class="prev-method" id="prev-method">—</span>
+    </div>
+  </div>
+
+  <!-- Scrubber & controls -->
+  <div class="scrub-wrap" id="scrub-wrap">
+    <div class="scrub-track">
+      <div class="scrub-bg"><div class="scrub-fill" id="scrub-fill"></div></div>
+      <input type="range" class="scrub-input" id="scrubber" min="0" max="100" value="0" step="1">
+      <div class="scrub-thumb" id="scrub-thumb"></div>
+    </div>
+    <div class="scrub-ticks" id="scrub-ticks"></div>
+    <div class="play-row">
+      <button class="pbtn primary" id="btn-play" onclick="togglePlay()">
+        <svg id="play-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        再生
+      </button>
+      <button class="pbtn loop-btn" id="btn-loop" title="ループ" onclick="toggleLoop()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>
+      </button>
+      <div style="flex:1"></div>
+      <button class="pbtn" id="btn-rebuild" onclick="buildFrames()" disabled style="display:none">再生成</button>
+    </div>
+  </div>
+
+</div><!-- /main -->
+
+<!-- Sidebar -->
+<div class="side">
+
+  <div>
+    <div class="sec-title">補間方式</div>
+    <div class="method-grid">
+      <button class="mth-btn active" data-method="linear">線形<br><span style="font-size:9px;color:inherit;opacity:.7">クロスフェード</span></button>
+      <button class="mth-btn" data-method="ease">イージング<br><span style="font-size:9px;color:inherit;opacity:.7">加減速あり</span></button>
+      <button class="mth-btn" data-method="flow">フロー<br><span style="font-size:9px;color:inherit;opacity:.7">動き推定</span></button>
+      <button class="mth-btn" data-method="dissolve">ディゾルブ<br><span style="font-size:9px;color:inherit;opacity:.7">ガンマ補正</span></button>
+    </div>
+    <div class="tip" id="method-tip">
+      <b>線形補間：</b>各ピクセルを均等な割合でブレンド。シンプルで高速。
+    </div>
+  </div>
+
+  <hr class="div">
+
+  <div>
+    <div class="sec-title">フレーム数・速度</div>
+    <div class="row">
+      <span class="row-label">生成フレーム数</span>
+      <span class="row-val"><span id="nf-val">30</span> 枚</span>
+    </div>
+    <input type="range" class="full-slider sl-frames" id="sl-nframes" min="5" max="120" value="30" step="5">
+    <div class="tick-row"><span>5</span><span>30</span><span>60</span><span>120</span></div>
+
+    <div class="row">
+      <span class="row-label">再生 FPS</span>
+      <span class="row-val"><span id="fps-val">24</span> fps</span>
+    </div>
+    <input type="range" class="full-slider sl-fps" id="sl-fps" min="6" max="60" value="24" step="1">
+    <div class="tick-row"><span>6</span><span>24</span><span>60</span></div>
+  </div>
+
+  <hr class="div">
+
+  <div>
+    <div class="sec-title">イージング強度</div>
+    <div class="row">
+      <span class="row-label">カーブ</span>
+      <span class="row-val" id="ease-name">線形</span>
+    </div>
+    <input type="range" class="full-slider sl-ease" id="sl-ease" min="0" max="4" value="0" step="1">
+    <div class="tick-row"><span>線形</span><span>ease</span><span>easeIn</span><span>easeOut</span><span>Spring</span></div>
+  </div>
+
+  <hr class="div">
+
+  <div>
+    <div class="sec-title">情報</div>
+    <div class="icard-grid">
+      <div class="icard"><div class="v" id="i-res">—</div><div class="l">解像度</div></div>
+      <div class="icard"><div class="v" id="i-dur">—</div><div class="l">元の長さ</div></div>
+      <div class="icard"><div class="v" id="i-nf">—</div><div class="l">総フレーム</div></div>
+      <div class="icard"><div class="v" id="i-playdur">—</div><div class="l">再生時間</div></div>
+    </div>
+  </div>
+
+  <hr class="div">
+
+  <div class="tip">
+    💡 <b>使い方：</b>動画を読み込むと最初・最後のフレームを抽出し、その間を補間した動画をブラウザ内で生成・再生します。<br><br>
+    <b>フロー補間</b>はピクセルの動きを推定して滑らかに合成します。<b>ディゾルブ</b>はガンマ空間でブレンドするため色が自然に変化します。
+  </div>
+
+</div><!-- /side -->
+</div><!-- /body -->
+
+<!-- hidden video -->
+<video id="source-video" style="display:none" preload="auto"></video>
+
+<script>
+// ── State ──
+let vw = 0, vh = 0, duration = 0;
+let frameA = null, frameB = null;   // ImageData
+let frames = [];
+let method = 'linear';
+let nFrames = 30, playFps = 24, easeIdx = 0;
+let isPlaying = false, looping = true;
+let playIdx = 0, playTimer = null;
+
+// Timeline
+let tlStartT = 0, tlEndT = 0;       // selected time (seconds)
+const THUMB_COUNT = 12;             // filmstrip thumbnails
+
+const EASE_NAMES = ['線形','ease','easeIn','easeOut','Spring'];
+const METHOD_TIPS = {
+  linear:  '<b>線形補間：</b>各ピクセルを均等な割合でブレンド。シンプルで高速。',
+  ease:    '<b>イージング：</b>スタートとエンドに加減速を加えた自然な動き。',
+  flow:    '<b>フロー補間：</b>ブロック単位の動きベクトルを推定し、ピクセルを移動させながら合成。',
+  dissolve:'<b>ディゾルブ：</b>リニア光のガンマ空間でブレンド。色の中間が自然になります。',
+};
+
+// Elements
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const srcVideo  = document.getElementById('source-video');
+const tlWrap    = document.getElementById('timeline-wrap');
+const buildProg = document.getElementById('build-progress');
+const prevWrap  = document.getElementById('preview-wrap');
+const scrubWrap = document.getElementById('scrub-wrap');
+const cvPreview = document.getElementById('cv-preview');
+const ctPrev    = cvPreview.getContext('2d');
+const scrubber  = document.getElementById('scrubber');
+const scrubFill = document.getElementById('scrub-fill');
+const scrubThumb= document.getElementById('scrub-thumb');
+const tlStage   = document.getElementById('tl-stage');
+const tlFilm    = document.getElementById('tl-film');
+const tlHandleS = document.getElementById('tl-handle-s');
+const tlHandleE = document.getElementById('tl-handle-e');
+const tlRange   = document.getElementById('tl-range');
+const tlShadeL  = document.getElementById('tl-shade-l');
+const tlShadeR  = document.getElementById('tl-shade-r');
+const tlPlayhead= document.getElementById('tl-playhead');
+
+// ── File load ──
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (f?.type.startsWith('video/')) load(f);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) load(e.target.files[0]); });
+
+function load(file) {
+  srcVideo.src = URL.createObjectURL(file);
+  srcVideo.load();
+  srcVideo.addEventListener('loadedmetadata', onMeta, { once: true });
+}
+
+function onMeta() {
+  vw = srcVideo.videoWidth;
+  vh = srcVideo.videoHeight;
+  duration = srcVideo.duration;
+  document.getElementById('i-res').textContent = `${vw}×${vh}`;
+  document.getElementById('i-dur').textContent = fmtTime(duration);
+
+  dropZone.style.display = 'none';
+  tlWrap.className = 'timeline-wrap ready';
+
+  tlStartT = 0;
+  tlEndT   = duration;
+  buildFilmstrip();
+}
+
+// ── Filmstrip ──
+async function buildFilmstrip() {
+  tlFilm.innerHTML = '';
+  const off = document.createElement('canvas');
+  off.width = 120; off.height = 68;
+  const oc = off.getContext('2d');
+
+  for (let i = 0; i < THUMB_COUNT; i++) {
+    const t = (i / (THUMB_COUNT - 1)) * duration;
+    await seekVideo(t);
+    oc.drawImage(srcVideo, 0, 0, 120, 68);
+    const url = off.toDataURL('image/jpeg', 0.6);
+    const div = document.createElement('div');
+    div.className = 'tl-film-thumb';
+    div.style.backgroundImage = `url(${url})`;
+    tlFilm.appendChild(div);
+  }
+
+  // Build time marks
+  const marks = document.getElementById('tl-marks');
+  marks.innerHTML = '';
+  for (let i = 0; i <= 4; i++) {
+    const t = (i / 4) * duration;
+    const s = document.createElement('span');
+    s.textContent = fmtTimeFull(t);
+    marks.appendChild(s);
+  }
+
+  // Set initial handles
+  tlStartT = 0;
+  tlEndT   = duration;
+  updateTlUI();
+  await captureFrameAt(tlStartT, 'start');
+  await captureFrameAt(tlEndT,   'end');
+  document.getElementById('btn-build').disabled = false;
+  document.getElementById('build-hint').textContent = '設定が完了したら生成してください';
+}
+
+// ── Timeline interaction ──
+let dragging = null; // 'start'|'end'|null
+
+function tlPosToTime(clientX) {
+  const rect = tlStage.getBoundingClientRect();
+  const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+  return frac * duration;
+}
+
+function timeFrac(t) { return t / duration; }
+
+function updateTlUI() {
+  const sF = timeFrac(tlStartT);
+  const eF = timeFrac(tlEndT);
+  tlHandleS.style.left = (sF * 100) + '%';
+  tlHandleE.style.left = (eF * 100) + '%';
+  tlRange.style.left   = (sF * 100) + '%';
+  tlRange.style.right  = ((1 - eF) * 100) + '%';
+  tlShadeL.style.width = (sF * 100) + '%';
+  tlShadeR.style.width = ((1 - eF) * 100) + '%';
+  document.getElementById('t-start').textContent = fmtTimeFull(tlStartT);
+  document.getElementById('t-end').textContent   = fmtTimeFull(tlEndT);
+  document.getElementById('tl-range-label').textContent =
+    fmtTimeFull(tlStartT) + ' → ' + fmtTimeFull(tlEndT) +
+    '（' + (tlEndT - tlStartT).toFixed(2) + 's）';
+  document.getElementById('interp-count').textContent = `${nFrames} フレーム補間`;
+}
+
+// Handle drag
+tlHandleS.addEventListener('mousedown', e => { dragging = 'start'; e.preventDefault(); });
+tlHandleE.addEventListener('mousedown', e => { dragging = 'end';   e.preventDefault(); });
+tlHandleS.addEventListener('touchstart', e => { dragging = 'start'; }, { passive: true });
+tlHandleE.addEventListener('touchstart', e => { dragging = 'end';   }, { passive: true });
+
+// Click on timeline body to set nearest handle
+tlStage.addEventListener('mousedown', e => {
+  if (e.target === tlHandleS || e.target === tlHandleE ||
+      e.target.closest('.tl-handle')) return;
+  const t = tlPosToTime(e.clientX);
+  const dS = Math.abs(t - tlStartT), dE = Math.abs(t - tlEndT);
+  dragging = dS < dE ? 'start' : 'end';
+  onDragMove(e.clientX);
+});
+
+window.addEventListener('mousemove', e => { if (dragging) onDragMove(e.clientX); });
+window.addEventListener('touchmove', e => { if (dragging) onDragMove(e.touches[0].clientX); }, { passive: true });
+
+window.addEventListener('mouseup',  onDragEnd);
+window.addEventListener('touchend', onDragEnd);
+
+function onDragMove(clientX) {
+  const t = tlPosToTime(clientX);
+  if (dragging === 'start') {
+    tlStartT = Math.max(0, Math.min(t, tlEndT - 0.05));
+  } else {
+    tlEndT = Math.min(duration, Math.max(t, tlStartT + 0.05));
+  }
+  updateTlUI();
+  // Show preview of hovered position
+  showPlayhead(timeFrac(t));
+}
+
+async function onDragEnd() {
+  if (!dragging) return;
+  const which = dragging;
+  dragging = null;
+  hidePlayhead();
+  if (which === 'start') await captureFrameAt(tlStartT, 'start');
+  else                   await captureFrameAt(tlEndT,   'end');
+}
+
+function showPlayhead(frac) {
+  tlPlayhead.style.left = (frac * 100) + '%';
+  tlPlayhead.classList.add('vis');
+}
+function hidePlayhead() { tlPlayhead.classList.remove('vis'); }
+
+// ── Capture frame ──
+async function seekVideo(t) {
+  return new Promise(resolve => {
+    srcVideo.currentTime = t;
+    srcVideo.addEventListener('seeked', resolve, { once: true });
+  });
+}
+
+async function captureFrameAt(t, which) {
+  await seekVideo(Math.max(0, Math.min(t, duration - 0.001)));
+  const off = document.createElement('canvas');
+  off.width = vw; off.height = vh;
+  off.getContext('2d').drawImage(srcVideo, 0, 0, vw, vh);
+  const imgData = off.getContext('2d').getImageData(0, 0, vw, vh);
+
+  if (which === 'start') {
+    frameA = imgData;
+    const cv = document.getElementById('cv-start');
+    cv.width = vw; cv.height = vh;
+    cv.getContext('2d').putImageData(imgData, 0, 0);
+  } else {
+    frameB = imgData;
+    const cv = document.getElementById('cv-end');
+    cv.width = vw; cv.height = vh;
+    cv.getContext('2d').putImageData(imgData, 0, 0);
+  }
+}
+
+// ── Build interpolated frames ──
+async function buildFrames() {
+  if (!frameA || !frameB) return;
+  stopPlay();
+  frames = [];
+  prevWrap.style.display  = 'none';
+  scrubWrap.style.display = 'none';
+  buildProg.style.display = 'block';
+  document.getElementById('btn-build').disabled = true;
+  document.getElementById('build-hint').textContent = '生成中...';
+
+  const A = frameA.data, B = frameB.data;
+  const len = A.length;
+  const total = nFrames + 2;
+
+  for (let fi = 0; fi < total; fi++) {
+    const rawT = fi / (total - 1);
+    const t = applyEase(rawT);
+    const out = new Uint8ClampedArray(len);
+
+    if (method === 'linear' || method === 'ease') blendLinear(A, B, out, t, len);
+    else if (method === 'flow')    blendFlow(A, B, out, t, vw, vh);
+    else if (method === 'dissolve') blendDissolve(A, B, out, t, len);
+
+    frames.push(new ImageData(out, vw, vh));
+
+    const pct = Math.round((fi / (total - 1)) * 100);
+    document.getElementById('bp-bar').style.width  = pct + '%';
+    document.getElementById('bp-pct').textContent  = pct + '%';
+    document.getElementById('bp-text').textContent = `フレーム ${fi + 1} / ${total} を生成中...`;
+    if (fi % 4 === 0) await sleep(0);
+  }
+
+  buildProg.style.display = 'none';
+  cvPreview.width  = vw;
+  cvPreview.height = vh;
+  prevWrap.style.display  = 'block';
+  scrubWrap.style.display = 'flex';
+
+  document.getElementById('i-nf').textContent      = frames.length;
+  document.getElementById('i-playdur').textContent = fmtTime(frames.length / playFps);
+  document.getElementById('prev-method').textContent = {linear:'線形',ease:'イージング',flow:'フロー',dissolve:'ディゾルブ'}[method];
+  document.getElementById('btn-build').disabled = false;
+  document.getElementById('build-hint').textContent = '再生成できます';
+
+  buildScrubTicks();
+  showFrame(0);
+
+  // Show playhead moving during playback
+  startPlay();
+}
+
+// ── Blend methods ──
+function blendLinear(A, B, out, t, len) {
+  const it = 1 - t;
+  for (let i = 0; i < len; i += 4) {
+    out[i]   = A[i]   * it + B[i]   * t;
+    out[i+1] = A[i+1] * it + B[i+1] * t;
+    out[i+2] = A[i+2] * it + B[i+2] * t;
+    out[i+3] = 255;
+  }
+}
+function blendDissolve(A, B, out, t, len) {
+  const it = 1 - t;
+  for (let i = 0; i < len; i += 4) {
+    const rA=(A[i]/255)**2.2, gA=(A[i+1]/255)**2.2, bA=(A[i+2]/255)**2.2;
+    const rB=(B[i]/255)**2.2, gB=(B[i+1]/255)**2.2, bB=(B[i+2]/255)**2.2;
+    out[i]   = Math.round((rA*it+rB*t)**(1/2.2)*255);
+    out[i+1] = Math.round((gA*it+gB*t)**(1/2.2)*255);
+    out[i+2] = Math.round((bA*it+bB*t)**(1/2.2)*255);
+    out[i+3] = 255;
+  }
+}
+function blendFlow(A, B, out, t, w, h) {
+  const BLK = 16, SR = 8, it = 1 - t;
+  for (let by = 0; by < h; by += BLK) {
+    for (let bx = 0; bx < w; bx += BLK) {
+      let bestDx = 0, bestDy = 0, bestSAD = Infinity;
+      for (let dy = -SR; dy <= SR; dy++) {
+        for (let dx = -SR; dx <= SR; dx++) {
+          let sad = 0;
+          for (let py = 0; py < BLK && by+py < h; py++) {
+            for (let px = 0; px < BLK && bx+px < w; px++) {
+              const ax=bx+px, ay=by+py;
+              const bxx=Math.min(w-1,Math.max(0,ax+dx)), byy=Math.min(h-1,Math.max(0,ay+dy));
+              const ia=(ay*w+ax)*4, ib=(byy*w+bxx)*4;
+              sad+=Math.abs(A[ia]-B[ib])+Math.abs(A[ia+1]-B[ib+1])+Math.abs(A[ia+2]-B[ib+2]);
+            }
+          }
+          if (sad < bestSAD) { bestSAD=sad; bestDx=dx; bestDy=dy; }
+        }
+      }
+      for (let py = 0; py < BLK && by+py < h; py++) {
+        for (let px = 0; px < BLK && bx+px < w; px++) {
+          const ox=bx+px, oy=by+py;
+          const axS=Math.min(w-1,Math.max(0,Math.round(ox+bestDx*t)));
+          const ayS=Math.min(h-1,Math.max(0,Math.round(oy+bestDy*t)));
+          const bxS=Math.min(w-1,Math.max(0,Math.round(ox-bestDx*it)));
+          const byS=Math.min(h-1,Math.max(0,Math.round(oy-bestDy*it)));
+          const ia=(ayS*w+axS)*4, ib=(byS*w+bxS)*4, od=(oy*w+ox)*4;
+          out[od]  =A[ia]  *it+B[ib]  *t;
+          out[od+1]=A[ia+1]*it+B[ib+1]*t;
+          out[od+2]=A[ia+2]*it+B[ib+2]*t;
+          out[od+3]=255;
+        }
+      }
+    }
+  }
+}
+
+// ── Easing ──
+function applyEase(t) {
+  if (easeIdx===0) return t;
+  if (easeIdx===1) return t<.5 ? 2*t*t : -1+(4-2*t)*t;
+  if (easeIdx===2) return t*t*t;
+  if (easeIdx===3) return 1-(1-t)**3;
+  if (easeIdx===4) return 1-Math.exp(-6*t)*Math.cos(10*t);
+  return t;
+}
+
+// ── Playback ──
+function showFrame(idx) {
+  if (!frames[idx]) return;
+  playIdx = idx;
+  ctPrev.putImageData(frames[idx], 0, 0);
+  document.getElementById('prev-badge').textContent = `F${idx+1} / ${frames.length}`;
+  const pct = (idx / Math.max(1, frames.length-1)) * 100;
+  scrubber.value = pct;
+  scrubFill.style.width = pct + '%';
+  scrubThumb.style.left = pct + '%';
+  // Move timeline playhead
+  const tSec = tlStartT + (tlEndT - tlStartT) * (idx / (frames.length - 1));
+  showPlayhead(tSec / duration);
+}
+
+function startPlay() {
+  if (isPlaying) return;
+  isPlaying = true; updatePlayBtn();
+  function tick() {
+    if (!isPlaying) return;
+    let next = playIdx + 1;
+    if (next >= frames.length) {
+      if (looping) next = 0; else { stopPlay(); return; }
+    }
+    showFrame(next);
+    playTimer = setTimeout(tick, 1000 / playFps);
+  }
+  playTimer = setTimeout(tick, 1000 / playFps);
+}
+function stopPlay() {
+  isPlaying = false; clearTimeout(playTimer); updatePlayBtn();
+  hidePlayhead();
+}
+function togglePlay() { if (isPlaying) stopPlay(); else startPlay(); }
+function toggleLoop() {
+  looping = !looping;
+  document.getElementById('btn-loop').classList.toggle('on', looping);
+}
+function updatePlayBtn() {
+  const ic  = document.getElementById('play-icon');
+  const btn = document.getElementById('btn-play');
+  if (isPlaying) {
+    ic.innerHTML = '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>';
+    btn.childNodes[btn.childNodes.length-1].textContent = ' 停止';
+  } else {
+    ic.innerHTML = '<path d="M8 5v14l11-7z"/>';
+    btn.childNodes[btn.childNodes.length-1].textContent = ' 再生';
+  }
+}
+
+// ── Scrubber ──
+scrubber.addEventListener('mousedown', () => stopPlay());
+scrubber.addEventListener('input', () => {
+  const idx = Math.round((scrubber.value / 100) * (frames.length - 1));
+  showFrame(idx);
+});
+function buildScrubTicks() {
+  const el = document.getElementById('scrub-ticks');
+  el.innerHTML = '';
+  const total = frames.length, steps = Math.min(total, 7);
+  for (let i = 0; i < steps; i++) {
+    const idx = Math.round((i / (steps-1)) * (total-1));
+    const s = document.createElement('span');
+    s.textContent = idx===0 ? '開始' : idx===total-1 ? '終了' : `F${idx+1}`;
+    el.appendChild(s);
+  }
+}
+
+// ── Sidebar controls ──
+document.querySelectorAll('.mth-btn').forEach(b => b.addEventListener('click', () => {
+  method = b.dataset.method;
+  document.querySelectorAll('.mth-btn').forEach(x => x.classList.toggle('active', x===b));
+  document.getElementById('method-tip').innerHTML = METHOD_TIPS[method];
+}));
+document.getElementById('sl-nframes').addEventListener('input', function() {
+  nFrames = +this.value;
+  document.getElementById('nf-val').textContent = nFrames;
+  document.getElementById('interp-count').textContent = `${nFrames} フレーム補間`;
+  updateSliderGrad(this,'sl-frames',(nFrames-5)/115);
+});
+document.getElementById('sl-fps').addEventListener('input', function() {
+  playFps = +this.value;
+  document.getElementById('fps-val').textContent = playFps;
+  updateSliderGrad(this,'sl-fps',(playFps-6)/54);
+  document.getElementById('i-playdur').textContent = fmtTime(frames.length/playFps);
+});
+document.getElementById('sl-ease').addEventListener('input', function() {
+  easeIdx = +this.value;
+  document.getElementById('ease-name').textContent = EASE_NAMES[easeIdx];
+  updateSliderGrad(this,'sl-ease',easeIdx/4);
+});
+function updateSliderGrad(el, cls, frac) {
+  const pct = Math.round(frac*100);
+  const c = {'sl-frames':'var(--acc)','sl-fps':'var(--acc3)','sl-ease':'var(--acc2)'}[cls]||'var(--acc)';
+  el.style.background = `linear-gradient(to right,${c} 0%,${c} ${pct}%,var(--surf3) ${pct}%)`;
+}
+
+// ── Helpers ──
+function fmtTime(s) {
+  if (!isFinite(s)) return '—';
+  return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+}
+function fmtTimeFull(s) {
+  if (!isFinite(s)) return '—';
+  const m=Math.floor(s/60), ss=Math.floor(s%60), ms=Math.floor((s%1)*1000);
+  return `${m}:${String(ss).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Init
+document.getElementById('btn-loop').classList.add('on');
+updateSliderGrad(document.getElementById('sl-nframes'),'sl-frames',(30-5)/115);
+updateSliderGrad(document.getElementById('sl-fps'),'sl-fps',(24-6)/54);
+updateSliderGrad(document.getElementById('sl-ease'),'sl-ease',0);
+
+</script>
+</body>
+</html>
